@@ -1,12 +1,10 @@
-use core::{fmt, time::Duration};
-
-use time::OffsetDateTime;
+use core::{cmp, fmt, time::Duration};
 
 #[derive(Debug, PartialEq, Eq)]
-pub enum ConditionalHeader<Etag> {
+pub enum ConditionalHeader<Etag, DateTime> {
     IfNoneMatch,
     IfMatch(Etag),
-    IfUnmodifiedSince(OffsetDateTime),
+    IfUnmodifiedSince(DateTime),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -43,21 +41,23 @@ impl std::error::Error for IdempotencyError {}
 
 pub trait ResourceState {
     type Etag: PartialEq<Self::Etag>;
+    type DateTime;
 
-    fn created(&self) -> OffsetDateTime;
-    fn updated(&self) -> Option<OffsetDateTime>;
+    fn created(&self) -> Self::DateTime;
+    fn updated(&self) -> Option<Self::DateTime>;
     fn etag(&self) -> Self::Etag;
 }
 
 pub const ACCEPT_MODIFIED_AFTER_DURATION_LIMIT: Duration = Duration::from_secs(60 * 60 * 24); // 24h
 
-pub fn verify_idempotency<Resource>(
+pub fn verify_idempotency<Resource, DateTime>(
     resource: Option<&Resource>,
-    conditional_header: &ConditionalHeader<Resource::Etag>,
-    accept_modified_after: Option<&OffsetDateTime>,
+    conditional_header: &ConditionalHeader<Resource::Etag, DateTime>,
+    accept_modified_after: Option<&DateTime>,
 ) -> Result<IdempotencySuccess, IdempotencyError>
 where
-    Resource: ResourceState,
+    Resource: ResourceState<DateTime = DateTime>,
+    DateTime: cmp::PartialOrd,
 {
     match conditional_header {
         ConditionalHeader::IfNoneMatch => verify_if_none_match(resource, accept_modified_after),
@@ -68,12 +68,13 @@ where
     }
 }
 
-pub fn verify_if_none_match<Resource>(
+pub fn verify_if_none_match<Resource, DateTime>(
     resource: Option<&Resource>,
-    accept_modified_after: Option<&OffsetDateTime>,
+    accept_modified_after: Option<&DateTime>,
 ) -> Result<IdempotencySuccess, IdempotencyError>
 where
-    Resource: ResourceState,
+    Resource: ResourceState<DateTime = DateTime>,
+    DateTime: cmp::PartialOrd,
 {
     match (resource, accept_modified_after) {
         (None, _) => return Ok(IdempotencySuccess::PreconditionMeet),
@@ -85,14 +86,15 @@ where
     }
 }
 
-pub fn verify_if_match<Resource, Etag>(
+pub fn verify_if_match<Resource, Etag, DateTime>(
     resource: Option<&Resource>,
     etag: &Etag,
-    accept_modified_after: Option<&OffsetDateTime>,
+    accept_modified_after: Option<&DateTime>,
 ) -> Result<IdempotencySuccess, IdempotencyError>
 where
-    Resource: ResourceState,
+    Resource: ResourceState<DateTime = DateTime>,
     Etag: PartialEq<Resource::Etag> + ?Sized,
+    DateTime: cmp::PartialOrd,
 {
     match resource {
         Some(resource) if *etag == resource.etag() => Ok(IdempotencySuccess::PreconditionMeet),
@@ -109,13 +111,14 @@ where
     }
 }
 
-pub fn verify_if_unmodified_since<Resource>(
+pub fn verify_if_unmodified_since<Resource, DateTime>(
     resource: Option<&Resource>,
-    unmodified: &OffsetDateTime,
-    accept_modified_after: Option<&OffsetDateTime>,
+    unmodified: &DateTime,
+    accept_modified_after: Option<&DateTime>,
 ) -> Result<IdempotencySuccess, IdempotencyError>
 where
-    Resource: ResourceState,
+    Resource: ResourceState<DateTime = DateTime>,
+    DateTime: cmp::PartialOrd,
 {
     match resource {
         Some(resource) => {
@@ -173,12 +176,13 @@ mod test_lib {
 
     impl ResourceState for Post {
         type Etag = Etag;
+        type DateTime = OffsetDateTime;
 
-        fn created(&self) -> OffsetDateTime {
+        fn created(&self) -> Self::DateTime {
             self.created
         }
 
-        fn updated(&self) -> Option<OffsetDateTime> {
+        fn updated(&self) -> Option<Self::DateTime> {
             self.updated
         }
 

@@ -10,4 +10,6 @@ default = []
 std = []
 
 [dependencies]
+
+[dev-dependencies]
 time = { version = "0.3.17", default-features = false, features = ["std"] }
